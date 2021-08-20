@@ -1,11 +1,11 @@
 [package]
 name = "build-n-run"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 notify = "4.0.17"
-clap = "2.33.3"
+structopt = "0.3.22"
 ignore = "0.4.18"
