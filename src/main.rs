@@ -1,45 +1,51 @@
 use ::std::{
     process::{Command, Child},
     sync::mpsc::channel,
-    time::Duration
+    time::Duration,
+    env::args_os,
+    ffi::OsString
 };
 
+use ::clap::{
+    crate_name,
+    crate_version
+};
 use ::notify::{
     watcher,
     Watcher,
     RecursiveMode,
     DebouncedEvent
 };
-use ::structopt::StructOpt;
 use ::ignore::gitignore::GitignoreBuilder;
 
-#[derive(StructOpt)]
-struct BuildNRun {
-    #[structopt(long)]
-    release: bool,
-    run_params: Vec<String>
+fn build(build_args: &[OsString]) -> bool {
+    Command::new("cargo").arg("build").args(build_args).status().unwrap().success()
 }
 
-fn build(bnr: &BuildNRun) -> bool {
-    let mut args = vec!["build", "--bin", "backend"];
-    if bnr.release {
-        args.push("--release")
-    }
-    Command::new("cargo").args(&args).status().unwrap().success()
-}
-
-fn run(bnr: &BuildNRun) -> Option<Child> {
-    let exe = if bnr.release {
-        "target/release/backend"
-    } else {
-        "target/debug/backend"
-    };
-    Command::new(exe).args(&bnr.run_params).spawn().ok()
+fn run(build_args: &[OsString], run_args: &[OsString]) -> Option<Child> {
+    let exe =
+        if build_args.iter().find(|e| *e == "--release").is_some() {
+            "target/release/backend"
+        } else {
+            "target/debug/backend"
+        };
+    Command::new(exe).args(run_args).spawn().ok()
 }
 
 fn main() {
-    let build_n_run = BuildNRun::from_args();
-
+    let args: Vec<_> = args_os().skip(1).collect();
+    if args == &["--version"] {
+        println!("{} {}", crate_name!(), crate_version!());
+        return;
+    }
+    let (build_args, run_args): (&[_], &[_]) =
+        match args.iter().position(|a| a == "--") {
+            Some(idx) => {
+                let (l, r) = args.split_at(idx);
+                (l, &r[1..])
+            },
+            None => (args.as_slice(), &[])
+        };
     let (gi, _) = GitignoreBuilder::new(".").build_global();
 
     let (tx, rx) = channel();
@@ -50,12 +56,12 @@ fn main() {
     let mut proc: Option<Child> = None;
 
     loop {
-        if build(&build_n_run) {
+        if build(build_args) {
             for mut child in proc.take() {
                 let _ = child.kill();
                 let _ = child.wait();
             }
-            proc = run(&build_n_run);
+            proc = run(build_args, run_args);
         }
 
         loop {
