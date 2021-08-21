@@ -11,45 +11,81 @@ use ::notify::{
     RecursiveMode,
     DebouncedEvent
 };
-use ::structopt::StructOpt;
+use ::structopt::{
+    StructOpt,
+    clap::AppSettings
+};
 use ::ignore::gitignore::GitignoreBuilder;
+use ::strum::{IntoStaticStr, EnumString, EnumVariantNames, VariantNames};
+
+#[derive(Clone, Copy, EnumString, EnumVariantNames, IntoStaticStr, Debug)]
+#[strum(serialize_all = "lowercase")]
+enum Color {
+    Auto,
+    Always,
+    Never
+}
 
 #[derive(StructOpt)]
+#[structopt(setting(AppSettings::DeriveDisplayOrder), setting(AppSettings::UnifiedHelpMessage))]
 struct BuildNRun {
-    #[structopt(long, help = "Path to watch")]
+    #[structopt(long, value_name = "PATH", help = "Path to watch")]
     watch: Vec<OsString>,
     #[structopt(long, short, help = "No output printed to stdout")]
     quiet: bool,
-    #[structopt(long, short, help = "Number of parallel jobs, default to # of CPUs")]
-    jobs: Option<i32>,
-    #[structopt(long, help = "Build only the specified binary")]
+    #[structopt(long, value_name = "NAME", help = "Build only the specified binary")]
     bin: OsString,
+    #[structopt(long, short, value_name = "SPEC", help = "Package with the target to run")]
+    package: Option<OsString>,
+    #[structopt(long, short, value_name = "N", help = "Number of parallel jobs, default to # of CPUs")]
+    jobs: Option<i32>,
     #[structopt(long, help = "Build artifacts in release mode, with optimizations")]
     release: bool,
-    #[structopt(long, help = "Space or comma separated list of features to activate")]
-    features: Option<OsString>,
+    #[structopt(long, value_name = "PROFILE-NAME", help = "Build artifacts with the specified profile")]
+    profile: Option<OsString>,
+    #[structopt(long, value_name = "FEATURES", help = "Space or comma separated list of features to activate")]
+    features: Vec<OsString>,
     #[structopt(long, help = "Activate all available features")]
     all_features: bool,
     #[structopt(long, help = "Do not activate the `default` feature")]
     no_default_features: bool,
-    #[structopt(long, help = "Directory for all generated artifacts")]
+    #[structopt(long, value_name = "TRIPLE", help = "Build for the target triple")]
+    triple: Option<OsString>,
+    #[structopt(long, value_name = "DIRECTORY", help = "Directory for all generated artifacts")]
     target_dir: Option<OsString>,
-    #[structopt(long, help = "Path to Cargo.toml")]
+    #[structopt(long, value_name = "PATH", help = "Path to Cargo.toml")]
     manifest_path: Option<OsString>,
+    #[structopt(long, value_name = "FMT", help = "Error format")]
+    message_format_path: Vec<OsString>,
+    #[structopt(short, long, parse(from_occurrences), help = "Use verbose output (-vv very verbose/build.rs output)")]
+    verbose: u32,
+    #[structopt(long, possible_values = Color::VARIANTS, value_name = "WHEN", help = "Coloring")]
+    color: Option<Color>,
     #[structopt(long, help = "Require Cargo.lock and cache are up to date")]
     frozen: bool,
     #[structopt(long, help = "Require Cargo.lock is up to date")]
     locked: bool,
     #[structopt(long, help = "Run without accessing the network")]
     offline: bool,
-    run_params: Vec<OsString>
+    args: Vec<OsString>
 }
 
 fn build(bnr: &BuildNRun) -> bool {
-    let mut args = vec![OsStr::new("build"), OsStr::new("--bin"), &bnr.bin];
+    let mut args = vec![OsStr::new("build")];
 
     if bnr.quiet {
         args.push(OsStr::new("--quiet"));
+    }
+
+    let mut bin_str = OsStr::new("--bin=").to_owned();
+    bin_str.push(&bnr.bin);
+    args.push(&bin_str);
+
+    let mut package_str;
+    if let Some(package) = &bnr.package {
+        package_str = OsStr::new("--package=").to_owned();
+        package_str.push(package);
+        args.push(&package_str);
     }
 
     let jobs_str;
@@ -62,28 +98,79 @@ fn build(bnr: &BuildNRun) -> bool {
     if bnr.release {
         args.push(OsStr::new("--release"));
     }
-    for features in &bnr.features {
-        args.push(&features);
+
+    let mut profile_str;
+    if let Some(profile) = &bnr.profile {
+        profile_str = OsStr::new("--profile=").to_owned();
+        profile_str.push(profile);
+        args.push(&profile_str);
     }
+
+    let mut features_strs = Vec::new();
+    for features in &bnr.features {
+        let mut features_str = OsStr::new("--features=").to_owned();
+        features_str.push(features);
+        features_strs.push(features_str);
+    }
+    for features_str in &features_strs {
+        args.push(&features_str);
+    }
+
     if bnr.all_features {
         args.push(OsStr::new("--all-features"));
     }
+
     if bnr.no_default_features {
         args.push(OsStr::new("--no-default-features"));
     }
-    if let Some(mft) = &bnr.manifest_path {
-        args.push(OsStr::new("--manifest-path"));
-        args.push(&mft);
+
+    let mut triple_str;
+    if let Some(triple) = &bnr.triple {
+        triple_str = OsStr::new("--triple=").to_owned();
+        triple_str.push(triple);
+        args.push(&triple_str);
     }
+
+    let mut manifest_path_str;
+    if let Some(mft) = &bnr.manifest_path {
+        manifest_path_str = OsStr::new("--manifest-path=").to_owned();
+        manifest_path_str.push(mft);
+        args.push(&manifest_path_str);
+    }
+
+    let mut message_format_path_strs = Vec::new();
+    for path in &bnr.message_format_path {
+        let mut message_format_path_str = OsStr::new("--message-format-path=").to_owned();
+        message_format_path_str.push(path);
+        message_format_path_strs.push(message_format_path_str);
+    }
+    for message_format_path_str in &message_format_path_strs {
+        args.push(&message_format_path_str);
+    }
+
+    for _ in 0..bnr.verbose {
+        args.push(OsStr::new("-v"));
+    }
+
+    let mut color_str;
+    if let Some(color) = bnr.color {
+        color_str = OsStr::new("--color=").to_owned();
+        color_str.push(OsStr::new::<str>(color.into()));
+        args.push(&color_str);
+    }
+
     if bnr.frozen {
         args.push(OsStr::new("--frozen"));
     }
+
     if bnr.locked {
         args.push(OsStr::new("--locked"));
     }
+
     if bnr.offline {
         args.push(OsStr::new("--offline"));
     }
+
     Command::new("cargo").args(&args).status().unwrap().success()
 }
 
@@ -99,7 +186,7 @@ fn run(bnr: &BuildNRun) -> Option<Child> {
     }
     exe.push("/");
     exe.push(&bnr.bin);
-    Command::new(exe).args(&bnr.run_params).spawn().ok()
+    Command::new(exe).args(&bnr.args).spawn().ok()
 }
 
 fn main() {
