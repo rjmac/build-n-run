@@ -11,9 +11,9 @@ use ::notify::{
     RecursiveMode,
     DebouncedEvent
 };
-use ::structopt::{
-    StructOpt,
-    clap::AppSettings
+use ::clap::{
+    Parser,
+    AppSettings
 };
 use ::ignore::gitignore::GitignoreBuilder;
 use ::strum::{IntoStaticStr, EnumString, EnumVariantNames, VariantNames};
@@ -26,47 +26,48 @@ enum Color {
     Never
 }
 
-#[derive(StructOpt)]
-#[structopt(setting(AppSettings::DeriveDisplayOrder), setting(AppSettings::UnifiedHelpMessage))]
+#[derive(Parser)]
+#[clap(setting(AppSettings::DeriveDisplayOrder), version)]
 struct BuildNRun {
-    #[structopt(long, value_name = "PATH", help = "Path to watch")]
+    #[clap(long, parse(from_os_str), value_name = "PATH", help = "Path to watch")]
     watch: Vec<OsString>,
-    #[structopt(long, short, help = "No output printed to stdout")]
+    #[clap(long, short, help = "No output printed to stdout")]
     quiet: bool,
-    #[structopt(long, value_name = "NAME", help = "Build only the specified binary")]
+    #[clap(long, parse(from_os_str), value_name = "NAME", help = "Build only the specified binary")]
     bin: OsString,
-    #[structopt(long, short, value_name = "SPEC", help = "Package with the target to run")]
+    #[clap(long, short, value_name = "SPEC", help = "Package with the target to run")]
     package: Option<OsString>,
-    #[structopt(long, short, value_name = "N", help = "Number of parallel jobs, default to # of CPUs")]
+    #[clap(long, short, value_name = "N", help = "Number of parallel jobs, default to # of CPUs")]
     jobs: Option<i32>,
-    #[structopt(long, help = "Build artifacts in release mode, with optimizations")]
+    #[clap(long, help = "Build artifacts in release mode, with optimizations")]
     release: bool,
-    #[structopt(long, value_name = "PROFILE-NAME", help = "Build artifacts with the specified profile")]
+    #[clap(long, parse(from_os_str), value_name = "PROFILE-NAME", help = "Build artifacts with the specified profile")]
     profile: Option<OsString>,
-    #[structopt(long, value_name = "FEATURES", help = "Space or comma separated list of features to activate")]
+    #[clap(long, parse(from_os_str), value_name = "FEATURES", help = "Space or comma separated list of features to activate")]
     features: Vec<OsString>,
-    #[structopt(long, help = "Activate all available features")]
+    #[clap(long, help = "Activate all available features")]
     all_features: bool,
-    #[structopt(long, help = "Do not activate the `default` feature")]
+    #[clap(long, help = "Do not activate the `default` feature")]
     no_default_features: bool,
-    #[structopt(long, value_name = "TRIPLE", help = "Build for the target triple")]
-    triple: Option<OsString>,
-    #[structopt(long, value_name = "DIRECTORY", help = "Directory for all generated artifacts")]
+    #[clap(long, parse(from_os_str), value_name = "TRIPLE", help = "Build for the target triple")]
+    target: Option<OsString>,
+    #[clap(long, parse(from_os_str), value_name = "DIRECTORY", help = "Directory for all generated artifacts")]
     target_dir: Option<OsString>,
-    #[structopt(long, value_name = "PATH", help = "Path to Cargo.toml")]
+    #[clap(long, value_name = "PATH", help = "Path to Cargo.toml")]
     manifest_path: Option<OsString>,
-    #[structopt(long, value_name = "FMT", help = "Error format")]
+    #[clap(long, parse(from_os_str), value_name = "FMT", help = "Error format")]
     message_format_path: Vec<OsString>,
-    #[structopt(short, long, parse(from_occurrences), help = "Use verbose output (-vv very verbose/build.rs output)")]
+    #[clap(short, long, parse(from_occurrences), help = "Use verbose output (-vv very verbose/build.rs output)")]
     verbose: u32,
-    #[structopt(long, possible_values = Color::VARIANTS, value_name = "WHEN", help = "Coloring")]
+    #[clap(long, possible_values = Color::VARIANTS, value_name = "WHEN", help = "Coloring")]
     color: Option<Color>,
-    #[structopt(long, help = "Require Cargo.lock and cache are up to date")]
+    #[clap(long, help = "Require Cargo.lock and cache are up to date")]
     frozen: bool,
-    #[structopt(long, help = "Require Cargo.lock is up to date")]
+    #[clap(long, help = "Require Cargo.lock is up to date")]
     locked: bool,
-    #[structopt(long, help = "Run without accessing the network")]
+    #[clap(long, help = "Run without accessing the network")]
     offline: bool,
+    #[clap(parse(from_os_str))]
     args: Vec<OsString>
 }
 
@@ -113,7 +114,7 @@ fn build(bnr: &BuildNRun) -> bool {
         features_strs.push(features_str);
     }
     for features_str in &features_strs {
-        args.push(&features_str);
+        args.push(features_str);
     }
 
     if bnr.all_features {
@@ -124,11 +125,11 @@ fn build(bnr: &BuildNRun) -> bool {
         args.push(OsStr::new("--no-default-features"));
     }
 
-    let mut triple_str;
-    if let Some(triple) = &bnr.triple {
-        triple_str = OsStr::new("--triple=").to_owned();
-        triple_str.push(triple);
-        args.push(&triple_str);
+    let mut target_str;
+    if let Some(target) = &bnr.target {
+        target_str = OsStr::new("--target=").to_owned();
+        target_str.push(target);
+        args.push(&target_str);
     }
 
     let mut manifest_path_str;
@@ -145,7 +146,7 @@ fn build(bnr: &BuildNRun) -> bool {
         message_format_path_strs.push(message_format_path_str);
     }
     for message_format_path_str in &message_format_path_strs {
-        args.push(&message_format_path_str);
+        args.push(message_format_path_str);
     }
 
     for _ in 0..bnr.verbose {
@@ -190,7 +191,7 @@ fn run(bnr: &BuildNRun) -> Option<Child> {
 }
 
 fn main() {
-    let build_n_run = BuildNRun::from_args();
+    let build_n_run = BuildNRun::parse();
 
     let (gi, _) = GitignoreBuilder::new(".").build_global();
 
@@ -208,7 +209,7 @@ fn main() {
 
     loop {
         if build(&build_n_run) {
-            for mut child in proc.take() {
+            if let Some(mut child) = proc.take() {
                 let _ = child.kill();
                 let _ = child.wait();
             }
